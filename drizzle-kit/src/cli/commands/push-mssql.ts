@@ -19,7 +19,7 @@ import { ddlDiff } from '../../dialects/mssql/diff';
 import { fromDrizzleSchema, prepareFromSchemaFiles } from '../../dialects/mssql/drizzle';
 import type { JsonStatement } from '../../dialects/mssql/statements';
 import { prepareEntityFilter } from '../../dialects/pull-utils';
-import { tableBeforeRenames } from '../../dialects/utils';
+import { identifierBeforeRenames } from '../../dialects/utils';
 import type { DB } from '../../utils';
 import { isInteractive, outputFormat } from '../context';
 import { CommandOutputCliError, UnsupportedSchemaChangeError } from '../errors';
@@ -150,11 +150,11 @@ export const handle = async (
 	return { status: 'ok' as const, dialect: 'mssql' };
 };
 
-const identifier = (it: { schema?: string; table: string }) => {
-	const { schema, table } = it;
+const quote = (it: { schema?: string; name: string }) => {
+	const { schema, name } = it;
 
 	const schemaKey = schema && schema !== 'dbo' ? `[${schema}].` : '';
-	const tableKey = `[${table}]`;
+	const tableKey = `[${name}]`;
 
 	return `${schemaKey}${tableKey}`;
 };
@@ -163,15 +163,11 @@ export const suggestions = async (db: DB, jsonStatements: JsonStatement[], ddl2:
 	const json = outputFormat() === 'json';
 	const useHints = json || !isInteractive();
 	const grouped: { hint: string; statement?: string }[] = [];
-	const tableBefore = tableBeforeRenames({
+	const identifier = identifierBeforeRenames({
 		schemas: jsonStatements.filter((it) => it.type === 'rename_schema'),
 		tables: jsonStatements.filter((it) => it.type === 'rename_table'),
 		moves: jsonStatements.filter((it) => it.type === 'move_table'),
-	});
-	const schemaBefore = tableBeforeRenames({
-		schemas: jsonStatements.filter((it) => it.type === 'rename_schema'),
-		tables: [],
-	});
+	}, quote);
 
 	const filtered = jsonStatements.filter((it) => {
 		if (it.type === 'alter_column' && it.diff.generated) return false;
@@ -181,8 +177,7 @@ export const suggestions = async (db: DB, jsonStatements: JsonStatement[], ddl2:
 
 	for (const statement of filtered) {
 		if (statement.type === 'drop_table') {
-			const inDb = schemaBefore({ schema: statement.table.schema, name: statement.table.name });
-			const tableName = identifier({ schema: inDb.schema, table: inDb.name });
+			const tableName = identifier(statement.table, 'dropped');
 			const entity = [statement.table.schema ?? 'dbo', statement.table.name] as const;
 			if (hints.matchConfirm('table', entity)) continue;
 			const res = await db.query(`select top(1) 1 from ${tableName};`);
@@ -200,8 +195,7 @@ export const suggestions = async (db: DB, jsonStatements: JsonStatement[], ddl2:
 		if (statement.type === 'drop_column') {
 			const column = statement.column;
 
-			const inDb = tableBefore({ schema: column.schema, name: column.table });
-			const key = identifier({ schema: inDb.schema, table: inDb.name });
+			const key = identifier({ schema: column.schema, name: column.table }, 'kept');
 			const entity = [column.schema ?? 'dbo', column.table, column.name] as const;
 			if (hints.matchConfirm('column', entity)) continue;
 
@@ -211,7 +205,7 @@ export const suggestions = async (db: DB, jsonStatements: JsonStatement[], ddl2:
 			if (useHints) {
 				hints.pushMissingHint({ type: 'confirm_data_loss', kind: 'column', entity, reason: 'non_empty' });
 			} else {
-				grouped.push({ hint: `You're about to delete non-empty [${column.name}] column in [${column.table}] table` });
+				grouped.push({ hint: `You're about to delete non-empty [${column.name}] column in ${key} table` });
 			}
 			continue;
 		}
@@ -238,13 +232,10 @@ export const suggestions = async (db: DB, jsonStatements: JsonStatement[], ddl2:
 		if (statement.type === 'drop_pk') {
 			const schema = statement.pk.schema ?? 'dbo';
 			const table = statement.pk.table;
-			const id = identifier({ table: table, schema: schema });
+			const id = identifier({ schema, name: table }, 'kept');
 			const entity = [schema, table, statement.pk.name] as const;
 			if (hints.matchConfirm('primary_key', entity)) continue;
-			const inDb = tableBefore({ schema, name: table });
-			const res = await db.query(
-				`select top(1) 1 from ${identifier({ table: inDb.name, schema: inDb.schema })};`,
-			);
+			const res = await db.query(`select top(1) 1 from ${id};`);
 
 			if (res.length > 0) {
 				const hint = `You're about to drop ${

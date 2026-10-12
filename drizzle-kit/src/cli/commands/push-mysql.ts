@@ -6,7 +6,7 @@ import { interimToDDL } from '../../dialects/mysql/ddl';
 import { ddlDiff } from '../../dialects/mysql/diff';
 import type { JsonStatement } from '../../dialects/mysql/statements';
 import { prepareEntityFilter } from '../../dialects/pull-utils';
-import { tableBeforeRenames } from '../../dialects/utils';
+import { identifierBeforeRenames } from '../../dialects/utils';
 import type { DB } from '../../utils';
 import { connectToMySQL } from '../connections';
 import { isInteractive, outputFormat } from '../context';
@@ -131,14 +131,16 @@ export const handle = async (
 	return { status: 'ok' as const, dialect: 'mysql' };
 };
 
-const identifier = ({ table, column }: { table?: string; column?: string }) => {
-	return [table, column].filter(Boolean).map((t) => `\`${t}\``).join('.');
-};
+const quote = ({ name }: { name: string }) => `\`${name}\``;
+
 export const suggestions = async (db: DB, jsonStatements: JsonStatement[], ddl2: MysqlDDL, hints: HintsHandler) => {
 	const json = outputFormat() === 'json';
 	const useHints = json || !isInteractive();
 	const grouped: { hint: string; statement?: string }[] = [];
-	const tableBefore = tableBeforeRenames({ tables: jsonStatements.filter((it) => it.type === 'rename_table') });
+	const identifier = identifierBeforeRenames(
+		{ tables: jsonStatements.filter((it) => it.type === 'rename_table') },
+		quote,
+	);
 
 	const filtered = jsonStatements.filter((it) => {
 		if (it.type === 'alter_column' && it.diff.generated) return false;
@@ -150,7 +152,7 @@ export const suggestions = async (db: DB, jsonStatements: JsonStatement[], ddl2:
 		if (statement.type === 'drop_table') {
 			const entity = ['public', statement.table] as const;
 			if (hints.matchConfirm('table', entity)) continue;
-			const res = await db.query(`select 1 from ${identifier({ table: statement.table })} limit 1`);
+			const res = await db.query(`select 1 from ${identifier({ name: statement.table }, 'dropped')} limit 1`);
 
 			if (res.length > 0) {
 				if (useHints) {
@@ -164,10 +166,10 @@ export const suggestions = async (db: DB, jsonStatements: JsonStatement[], ddl2:
 
 		if (statement.type === 'drop_column') {
 			const column = statement.column;
+			const id = identifier({ name: column.table }, 'kept');
 			const entity = ['public', column.table, column.name] as const;
 			if (hints.matchConfirm('column', entity)) continue;
-			const tableInDb = tableBefore({ name: column.table }).name;
-			const res = await db.query(`select 1 from ${identifier({ table: tableInDb })} limit 1`);
+			const res = await db.query(`select 1 from ${id} limit 1`);
 			if (res.length === 0) continue;
 
 			if (useHints) {
@@ -175,7 +177,7 @@ export const suggestions = async (db: DB, jsonStatements: JsonStatement[], ddl2:
 			} else {
 				grouped.push({
 					hint: `You're about to delete non-empty ${chalk.underline(column.name)} column in ${
-						chalk.underline(column.table)
+						chalk.underline(id)
 					} table`,
 				});
 			}
@@ -185,7 +187,7 @@ export const suggestions = async (db: DB, jsonStatements: JsonStatement[], ddl2:
 		// drop pk
 		if (statement.type === 'drop_pk') {
 			const { table, columns } = statement.pk;
-			const id = identifier({ table: tableBefore({ name: table }).name });
+			const id = identifier({ name: table }, 'kept');
 			const entity = ['public', table, statement.pk.name] as const;
 			if (hints.matchConfirm('primary_key', entity)) continue;
 			const res = await db.query(
@@ -194,7 +196,7 @@ export const suggestions = async (db: DB, jsonStatements: JsonStatement[], ddl2:
 
 			if (res.length > 0) {
 				const hint = `You're about to drop ${
-					chalk.underline(table)
+					chalk.underline(id)
 				} primary key, this statements may fail and your table may lose primary key`;
 
 				if (useHints) {
@@ -244,8 +246,8 @@ export const suggestions = async (db: DB, jsonStatements: JsonStatement[], ddl2:
 		}
 
 		if (statement.type === 'alter_column') {
-			const tableName = identifier({ table: statement.origin.table });
-			const columnName = identifier({ column: statement.origin.column });
+			const tableName = quote({ name: statement.origin.table });
+			const columnName = quote({ name: statement.origin.column });
 
 			if (statement.diff.type) {
 				const entity = ['public', statement.column.table, statement.column.name] as const;

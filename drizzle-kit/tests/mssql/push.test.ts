@@ -1256,7 +1256,7 @@ test('drop column in a renamed table with data', async () => {
 		'ALTER TABLE [accounts] DROP COLUMN [name];',
 	]);
 	expect(phints).toStrictEqual([
-		{ hint: `You're about to delete non-empty [name] column in [accounts] table` },
+		{ hint: `You're about to delete non-empty [name] column in [users] table` },
 	]);
 });
 
@@ -1311,7 +1311,7 @@ test('drop primary key in a renamed table with data', async () => {
 		'ALTER TABLE [accounts] DROP CONSTRAINT [users_pkey];',
 	]);
 	expect(phints.map((it) => ({ ...it, hint: stripAnsi(it.hint) }))).toStrictEqual([{
-		hint: `You're about to drop [accounts] primary key, this statements may fail and your table may lose primary key`,
+		hint: `You're about to drop [users] primary key, this statements may fail and your table may lose primary key`,
 	}]);
 });
 

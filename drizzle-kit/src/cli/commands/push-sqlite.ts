@@ -8,7 +8,7 @@ import { ddlDiff } from '../../dialects/sqlite/diff';
 import { fromDrizzleSchema } from '../../dialects/sqlite/drizzle';
 import type { SchemaSource } from '../../dialects/sqlite/drizzle';
 import type { JsonStatement } from '../../dialects/sqlite/statements';
-import { tableBeforeRenames } from '../../dialects/utils';
+import { identifierBeforeRenames } from '../../dialects/utils';
 import type { SQLiteClient } from '../../utils';
 import { isInteractive, outputFormat } from '../context';
 import { CommandOutputCliError } from '../errors';
@@ -139,7 +139,10 @@ export const suggestions = async (
 	const json = outputFormat() === 'json';
 	const useHints = json || !isInteractive();
 	const grouped: { hint: string; statement?: string }[] = [];
-	const tableBefore = tableBeforeRenames({ tables: jsonStatements.filter((it) => it.type === 'rename_table') });
+	const identifier = identifierBeforeRenames(
+		{ tables: jsonStatements.filter((it) => it.type === 'rename_table') },
+		(it) => `"${it.name}"`,
+	);
 
 	// TODO: generate truncations/recreates ??
 	for (const statement of jsonStatements) {
@@ -147,7 +150,7 @@ export const suggestions = async (
 			const name = statement.tableName;
 			const entity = ['public', name] as const;
 			if (hints.matchConfirm('table', entity)) continue;
-			const res = await connection.query(`select 1 from "${name}" limit 1;`);
+			const res = await connection.query(`select 1 from ${identifier({ name }, 'dropped')} limit 1;`);
 
 			if (res.length > 0) {
 				if (useHints) {
@@ -164,12 +167,13 @@ export const suggestions = async (
 			const entity = ['public', table, name] as const;
 			if (hints.matchConfirm('column', entity)) continue;
 
-			const res = await connection.query(`select 1 from "${tableBefore({ name: table }).name}" limit 1;`);
+			const id = identifier({ name: table }, 'kept');
+			const res = await connection.query(`select 1 from ${id} limit 1;`);
 			if (res.length > 0) {
 				if (useHints) {
 					hints.pushMissingHint({ type: 'confirm_data_loss', kind: 'column', entity, reason: 'non_empty' });
 				} else {
-					grouped.push({ hint: `You're about to delete '${name}' column in a non-empty '${table}' table` });
+					grouped.push({ hint: `You're about to delete '${name}' column in a non-empty ${id} table` });
 				}
 			}
 			continue;
@@ -178,12 +182,12 @@ export const suggestions = async (
 		if (statement.type === 'add_column' && (statement.column.notNull && !statement.column.default)) {
 			const { table, name } = statement.column;
 			const entity = ['public', table, name] as const;
-			const tableInDb = tableBefore({ name: table }).name;
-			const res = await connection.query(`select 1 from "${tableInDb}" limit 1`);
+			const id = identifier({ name: table }, 'kept');
+			const res = await connection.query(`select 1 from ${id} limit 1`);
 			const tableNonEmpty = res.length > 0;
 			const loss = {
-				hint: `You're about to add not-null '${name}' column without default value to non-empty '${table}' table`,
-				statement: `DELETE FROM "${tableInDb}" where true;`,
+				hint: `You're about to add not-null '${name}' column without default value to non-empty ${id} table`,
+				statement: `DELETE FROM ${id} where true;`,
 			};
 
 			if (hints.matchConfirm('add_not_null', entity)) {
@@ -215,7 +219,8 @@ export const suggestions = async (
 			);
 			if (droppedColumns.length === 0) continue;
 
-			const res = await connection.query(`select 1 from "${tableBefore(statement.from).name}" limit 1`);
+			const id = identifier(statement.from, 'kept');
+			const res = await connection.query(`select 1 from ${id} limit 1`);
 			if (res.length > 0) {
 				if (useHints) {
 					for (const droppedColumn of droppedColumns) {
@@ -228,7 +233,7 @@ export const suggestions = async (
 						{
 							hint: `You're about to drop ${
 								droppedColumns.map((col) => `'${col.name}'`).join(', ')
-							} column(s) in a non-empty '${statement.from.name}' table`,
+							} column(s) in a non-empty ${id} table`,
 						},
 					);
 				}

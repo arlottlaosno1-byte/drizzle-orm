@@ -699,7 +699,7 @@ test('drop autoincrement. drop column with data', async (t) => {
 	expect(st).toStrictEqual(st0);
 	expect(pst).toStrictEqual(st0);
 
-	expect(phints[0].hint).toStrictEqual("You're about to drop 'name' column(s) in a non-empty 'companies' table");
+	expect(phints[0].hint).toStrictEqual("You're about to drop 'name' column(s) in a non-empty \"companies\" table");
 });
 
 test('drop autoincrement. drop column with data with pragma off', async (t) => {
@@ -752,7 +752,7 @@ test('drop autoincrement. drop column with data with pragma off', async (t) => {
 	expect(st).toStrictEqual(st0);
 	expect(pst).toStrictEqual(st0);
 
-	expect(phints[0].hint).toStrictEqual("You're about to drop 'name' column(s) in a non-empty 'companies' table");
+	expect(phints[0].hint).toStrictEqual("You're about to drop 'name' column(s) in a non-empty \"companies\" table");
 });
 
 test('change autoincrement. other table references current', async (t) => {
@@ -1959,7 +1959,7 @@ test('drop column in a renamed table with data', async () => {
 		'ALTER TABLE `accounts` DROP COLUMN `name`;',
 	]);
 	expect(phints).toStrictEqual([
-		{ hint: `You're about to delete 'name' column in a non-empty 'accounts' table` },
+		{ hint: `You're about to delete 'name' column in a non-empty "users" table` },
 	]);
 });
 
@@ -1987,7 +1987,7 @@ test('added column not null and without default to a renamed table with data', a
 		'ALTER TABLE `accounts` ADD `age` integer NOT NULL;',
 	]);
 	expect(phints).toStrictEqual([{
-		hint: `You're about to add not-null 'age' column without default value to non-empty 'accounts' table`,
+		hint: `You're about to add not-null 'age' column without default value to non-empty "users" table`,
 		statement: 'DELETE FROM "users" where true;',
 	}]);
 	expect(error).toBeNull();
@@ -2021,6 +2021,6 @@ test('drop autoincrement. drop column in a renamed table with data', async () =>
 		'PRAGMA foreign_keys=ON;',
 	]);
 	expect(phints).toStrictEqual([
-		{ hint: `You're about to drop 'name' column(s) in a non-empty 'accounts' table` },
+		{ hint: `You're about to drop 'name' column(s) in a non-empty "companies" table` },
 	]);
 });

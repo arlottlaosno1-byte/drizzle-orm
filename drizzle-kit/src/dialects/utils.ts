@@ -182,17 +182,25 @@ export const preserveEntityNames = <
 
 // Statements name a table as it is after the diff. A data loss check runs before any statement,
 // so it must query the table by the name that the database still has.
-export const tableBeforeRenames = (renames: {
-	schemas?: readonly { from: Named; to: Named }[];
-	tables: readonly { schema?: string; from: string; to: string }[];
-	moves?: readonly { name: string; from: string; to: string }[];
-}) =>
-<T extends { schema?: string; name: string }>(table: T): T => {
-	const schema = renames.moves?.find((it) => it.name === table.name && it.to === table.schema)?.from ?? table.schema;
-	const name = renames.tables.find((it) => it.to === table.name && it.schema === schema)?.from ?? table.name;
-	const schemaBefore = renames.schemas?.find((it) => it.to.name === schema)?.from.name ?? schema;
+// `'dropped'` applies only the schema rename, because a renamed or moved table can take the name
+// of a dropped table.
+export const identifierBeforeRenames = (
+	renames: {
+		schemas?: readonly { from: Named; to: Named }[];
+		tables: readonly { schema?: string; from: string; to: string }[];
+		moves?: readonly { name: string; from: string; to: string }[];
+	},
+	quote: (table: { schema?: string; name: string }) => string,
+) =>
+(table: { schema?: string; name: string }, diffResult: 'kept' | 'dropped'): string => {
+	let { schema, name } = table;
+	if (diffResult === 'kept') {
+		schema = renames.moves?.find((it) => it.name === name && it.to === schema)?.from ?? schema;
+		name = renames.tables.find((it) => it.to === name && it.schema === schema)?.from ?? name;
+	}
+	schema = renames.schemas?.find((it) => it.to.name === schema)?.from.name ?? schema;
 
-	return { ...table, schema: schemaBefore, name };
+	return quote({ schema, name });
 };
 
 export const filterMigrationsSchema = (

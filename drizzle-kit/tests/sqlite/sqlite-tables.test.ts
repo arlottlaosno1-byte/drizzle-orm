@@ -17,6 +17,10 @@ import {
 	unique,
 	uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
+import { suggestions } from 'src/cli/commands/push-sqlite';
+import { runWithCliContext } from 'src/cli/context';
+import { HintsHandler } from 'src/cli/hints';
+import { prepareStatement } from 'src/dialects/sqlite/statements';
 import { afterAll, beforeAll, beforeEach, expect, test } from 'vitest';
 import { diff, prepareTestDatabase, push, TestDatabase } from './mocks';
 
@@ -1153,4 +1157,21 @@ test('recreate table and add unique column', async (t) => {
 	expect(errorMessage).toStrictEqual(
 		`query error: INSERT INTO rating_event (id, player_id) VALUES ('e2', 'p1')\n\nUNIQUE constraint failed: rating_event.player_id`,
 	);
+});
+
+test('drop table with data when a renamed table takes its name', async () => {
+	await db.run('CREATE TABLE `a` (`id` integer);');
+	await db.run('CREATE TABLE `b` (`id` integer);');
+	await db.run('INSERT INTO `a` (`id`) VALUES (1);');
+
+	const hints = new HintsHandler();
+	await runWithCliContext({ output: 'json', interactive: false }, () =>
+		suggestions(db, [
+			prepareStatement('drop_table', { tableName: 'a' }),
+			prepareStatement('rename_table', { from: 'b', to: 'a' }),
+		], hints));
+
+	expect(hints.missingHints).toStrictEqual([
+		{ type: 'confirm_data_loss', kind: 'table', entity: ['public', 'a'], reason: 'non_empty' },
+	]);
 });

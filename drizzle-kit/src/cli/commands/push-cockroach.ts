@@ -19,7 +19,7 @@ import { fromDrizzleSchema, prepareFromSchemaFiles } from '../../dialects/cockro
 import type { JsonStatement } from '../../dialects/cockroach/statements';
 import { extractCrdbExisting } from '../../dialects/drizzle';
 import { prepareEntityFilter } from '../../dialects/pull-utils';
-import { tableBeforeRenames } from '../../dialects/utils';
+import { identifierBeforeRenames } from '../../dialects/utils';
 import type { DB } from '../../utils';
 import { isInteractive, outputFormat } from '../context';
 import { CommandOutputCliError } from '../errors';
@@ -161,7 +161,7 @@ export const handle = async (
 	return { status: 'ok' as const, dialect: 'cockroach' };
 };
 
-const identifier = (it: { schema?: string; name: string }) => {
+const quote = (it: { schema?: string; name: string }) => {
 	const { schema, name } = it;
 	const schemakey = schema && schema !== 'public' ? `"${schema}".` : '';
 	return `${schemakey}"${name}"`;
@@ -171,15 +171,11 @@ export const suggestions = async (db: DB, jsonStatements: JsonStatement[], hints
 	const json = outputFormat() === 'json';
 	const useHints = json || !isInteractive();
 	const grouped: { hint: string; statement?: string }[] = [];
-	const tableBefore = tableBeforeRenames({
+	const identifier = identifierBeforeRenames({
 		schemas: jsonStatements.filter((it) => it.type === 'rename_schema'),
 		tables: jsonStatements.filter((it) => it.type === 'rename_table'),
 		moves: jsonStatements.filter((it) => it.type === 'move_table'),
-	});
-	const schemaBefore = tableBeforeRenames({
-		schemas: jsonStatements.filter((it) => it.type === 'rename_schema'),
-		tables: [],
-	});
+	}, quote);
 
 	const filtered = jsonStatements.filter((it) => {
 		// discussion -
@@ -224,10 +220,10 @@ export const suggestions = async (db: DB, jsonStatements: JsonStatement[], hints
 		}
 
 		if (statement.type === 'drop_view' && statement.view.materialized) {
-			const id = identifier(statement.view);
+			const id = identifier(statement.view, 'dropped');
 			const entity = [statement.view.schema, statement.view.name] as const;
 			if (hints.matchConfirm('view', entity)) continue;
-			const res = await db.query(`select 1 from ${identifier(schemaBefore(statement.view))} limit 1`);
+			const res = await db.query(`select 1 from ${id} limit 1`);
 			if (res.length === 0) continue;
 
 			if (useHints) {
@@ -240,11 +236,10 @@ export const suggestions = async (db: DB, jsonStatements: JsonStatement[], hints
 
 		if (statement.type === 'drop_column') {
 			const column = statement.column;
-			const id = identifier({ schema: column.schema, name: column.table });
+			const id = identifier({ schema: column.schema, name: column.table }, 'kept');
 			const entity = [column.schema, column.table, column.name] as const;
 			if (hints.matchConfirm('column', entity)) continue;
-			const idInDb = identifier(tableBefore({ schema: column.schema, name: column.table }));
-			const res = await db.query(`select 1 from ${idInDb} limit 1`);
+			const res = await db.query(`select 1 from ${id} limit 1`);
 			if (res.length === 0) continue;
 
 			if (useHints) {
@@ -277,13 +272,11 @@ export const suggestions = async (db: DB, jsonStatements: JsonStatement[], hints
 		if (statement.type === 'drop_pk') {
 			const schema = statement.pk.schema ?? 'public';
 			const table = statement.pk.table;
-			const id = `"${schema}"."${table}"`;
+			const id = identifier({ schema, name: table }, 'kept');
 			const entity = [schema, table, statement.pk.name] as const;
 			if (hints.matchConfirm('primary_key', entity)) continue;
-			const inDb = tableBefore({ schema, name: table });
-			const idInDb = `"${inDb.schema}"."${inDb.name}"`;
 			const res = await db.query(
-				`select 1 from ${idInDb} limit 1`,
+				`select 1 from ${id} limit 1`,
 			);
 
 			if (res.length > 0) {
